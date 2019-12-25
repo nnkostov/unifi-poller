@@ -1,4 +1,4 @@
-package unifipoller
+package poller
 
 import (
 	"fmt"
@@ -20,21 +20,24 @@ func (u *UnifiPoller) DumpJSONPayload() (err error) {
 	if err != nil {
 		return err
 	}
+
 	fmt.Fprintf(os.Stderr, "[INFO] Authenticated to UniFi Controller @ %v as user %v",
 		u.Config.UnifiBase, u.Config.UnifiUser)
 	if err := u.CheckSites(); err != nil {
 		return err
 	}
+
 	u.Unifi.ErrorLog = func(m string, v ...interface{}) {
 		fmt.Fprintf(os.Stderr, "[ERROR] "+m, v...)
 	} // Log all errors to stderr.
+
 	switch sites, err := u.GetFilteredSites(); {
 	case err != nil:
 		return err
 	case StringInSlice(u.Flag.DumpJSON, []string{"d", "device", "devices"}):
-		return u.dumpSitesJSON(unifi.DevicePath, "Devices", sites)
+		return u.dumpSitesJSON(unifi.APIDevicePath, "Devices", sites)
 	case StringInSlice(u.Flag.DumpJSON, []string{"client", "clients", "c"}):
-		return u.dumpSitesJSON(unifi.ClientPath, "Clients", sites)
+		return u.dumpSitesJSON(unifi.APIClientPath, "Clients", sites)
 	case strings.HasPrefix(u.Flag.DumpJSON, "other "):
 		apiPath := strings.SplitN(u.Flag.DumpJSON, " ", 2)[1]
 		_, _ = fmt.Fprintf(os.Stderr, "[INFO] Dumping Path '%s':\n", apiPath)

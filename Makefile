@@ -42,6 +42,12 @@ $(PACKAGE_SCRIPTS) \
 --config-files "/etc/$(BINARY)/$(CONFIG_FILE)"
 endef
 
+VERSION_LDFLAGS:= \
+  -X $(IMPORT_PATH)/vendor/github.com/prometheus/common/version.Branch=$(BRANCH) \
+  -X $(IMPORT_PATH)/vendor/github.com/prometheus/common/version.BuildDate=$(DATE) \
+  -X $(IMPORT_PATH)/vendor/github.com/prometheus/common/version.Revision=$(COMMIT) \
+  -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)
+
 # Makefile targets follow.
 
 all: build
@@ -56,6 +62,7 @@ release: clean macos windows linux_packages
 	mv *.rpm *.deb $@/
 	# Generating File Hashes
 	openssl dgst -r -sha256 $@/* | sed 's#release/##' | tee $@/checksums.sha256.txt
+
 
 # Delete all build assets.
 clean:
@@ -87,41 +94,41 @@ README.html: md2roff
 # Binaries
 
 build: $(BINARY)
-$(BINARY): *.go */*.go
-	go build -o $(BINARY) -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+$(BINARY): main.go pkg/*/*.go
+	go build -o $(BINARY) -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 linux: $(BINARY).amd64.linux
-$(BINARY).amd64.linux: *.go */*.go
+$(BINARY).amd64.linux: main.go pkg/*/*.go
 	# Building linux 64-bit x86 binary.
-	GOOS=linux GOARCH=amd64 go build -o $@ -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+	GOOS=linux GOARCH=amd64 go build -o $@ -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 linux386: $(BINARY).i386.linux
-$(BINARY).i386.linux: *.go */*.go
+$(BINARY).i386.linux: main.go pkg/*/*.go
 	# Building linux 32-bit x86 binary.
-	GOOS=linux GOARCH=386 go build -o $@ -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+	GOOS=linux GOARCH=386 go build -o $@ -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 arm: arm64 armhf
 
 arm64: $(BINARY).arm64.linux
-$(BINARY).arm64.linux: *.go */*.go
+$(BINARY).arm64.linux: main.go pkg/*/*.go
 	# Building linux 64-bit ARM binary.
-	GOOS=linux GOARCH=arm64 go build -o $@ -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+	GOOS=linux GOARCH=arm64 go build -o $@ -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 armhf: $(BINARY).armhf.linux
-$(BINARY).armhf.linux: *.go */*.go
+$(BINARY).armhf.linux: main.go pkg/*/*.go
 	# Building linux 32-bit ARM binary.
-	GOOS=linux GOARCH=arm GOARM=6 go build -o $@ -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+	GOOS=linux GOARCH=arm GOARM=6 go build -o $@ -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 macos: $(BINARY).amd64.macos
-$(BINARY).amd64.macos: *.go */*.go
+$(BINARY).amd64.macos: main.go pkg/*/*.go
 	# Building darwin 64-bit x86 binary.
-	GOOS=darwin GOARCH=amd64 go build -o $@ -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+	GOOS=darwin GOARCH=amd64 go build -o $@ -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 exe: $(BINARY).amd64.exe
 windows: $(BINARY).amd64.exe
-$(BINARY).amd64.exe: *.go */*.go
+$(BINARY).amd64.exe: main.go pkg/*/*.go
 	# Building windows 64-bit x86 binary.
-	GOOS=windows GOARCH=amd64 go build -o $@ -ldflags "-w -s -X $(VERSION_PATH)=$(VERSION)-$(ITERATION)"
+	GOOS=windows GOARCH=amd64 go build -o $@ -ldflags "-w -s $(VERSION_LDFLAGS)"
 
 # Packages
 
@@ -131,41 +138,49 @@ rpm: $(BINARY)-$(RPMVERSION)-$(ITERATION).x86_64.rpm
 $(BINARY)-$(RPMVERSION)-$(ITERATION).x86_64.rpm: package_build_linux check_fpm
 	@echo "Building 'rpm' package for $(BINARY) version '$(RPMVERSION)-$(ITERATION)'."
 	fpm -s dir -t rpm $(PACKAGE_ARGS) -a x86_64 -v $(RPMVERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn rpmsign --key-id=$(SIGNING_KEY) --resign $(BINARY)-$(RPMVERSION)-$(ITERATION).x86_64.rpm; expect -exact \"Enter pass phrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 deb: $(BINARY)_$(VERSION)-$(ITERATION)_amd64.deb
 $(BINARY)_$(VERSION)-$(ITERATION)_amd64.deb: package_build_linux check_fpm
 	@echo "Building 'deb' package for $(BINARY) version '$(VERSION)-$(ITERATION)'."
 	fpm -s dir -t deb $(PACKAGE_ARGS) -a amd64 -v $(VERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn debsigs --default-key="$(SIGNING_KEY)" --sign=origin $(BINARY)_$(VERSION)-$(ITERATION)_amd64.deb; expect -exact \"Enter passphrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 rpm386: $(BINARY)-$(RPMVERSION)-$(ITERATION).i386.rpm
 $(BINARY)-$(RPMVERSION)-$(ITERATION).i386.rpm: package_build_linux_386 check_fpm
 	@echo "Building 32-bit 'rpm' package for $(BINARY) version '$(RPMVERSION)-$(ITERATION)'."
 	fpm -s dir -t rpm $(PACKAGE_ARGS) -a i386 -v $(RPMVERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn rpmsign --key-id=$(SIGNING_KEY) --resign $(BINARY)-$(RPMVERSION)-$(ITERATION).i386.rpm; expect -exact \"Enter pass phrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 deb386: $(BINARY)_$(VERSION)-$(ITERATION)_i386.deb
 $(BINARY)_$(VERSION)-$(ITERATION)_i386.deb: package_build_linux_386 check_fpm
 	@echo "Building 32-bit 'deb' package for $(BINARY) version '$(VERSION)-$(ITERATION)'."
 	fpm -s dir -t deb $(PACKAGE_ARGS) -a i386 -v $(VERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn debsigs --default-key="$(SIGNING_KEY)" --sign=origin $(BINARY)_$(VERSION)-$(ITERATION)_i386.deb; expect -exact \"Enter passphrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 rpmarm: $(BINARY)-$(RPMVERSION)-$(ITERATION).arm64.rpm
 $(BINARY)-$(RPMVERSION)-$(ITERATION).arm64.rpm: package_build_linux_arm64 check_fpm
 	@echo "Building 64-bit ARM8 'rpm' package for $(BINARY) version '$(RPMVERSION)-$(ITERATION)'."
 	fpm -s dir -t rpm $(PACKAGE_ARGS) -a arm64 -v $(RPMVERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn rpmsign --key-id=$(SIGNING_KEY) --resign $(BINARY)-$(RPMVERSION)-$(ITERATION).arm64.rpm; expect -exact \"Enter pass phrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 debarm: $(BINARY)_$(VERSION)-$(ITERATION)_arm64.deb
 $(BINARY)_$(VERSION)-$(ITERATION)_arm64.deb: package_build_linux_arm64 check_fpm
 	@echo "Building 64-bit ARM8 'deb' package for $(BINARY) version '$(VERSION)-$(ITERATION)'."
 	fpm -s dir -t deb $(PACKAGE_ARGS) -a arm64 -v $(VERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn debsigs --default-key="$(SIGNING_KEY)" --sign=origin $(BINARY)_$(VERSION)-$(ITERATION)_arm64.deb; expect -exact \"Enter passphrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 rpmarmhf: $(BINARY)-$(RPMVERSION)-$(ITERATION).armhf.rpm
 $(BINARY)-$(RPMVERSION)-$(ITERATION).armhf.rpm: package_build_linux_armhf check_fpm
 	@echo "Building 32-bit ARM6/7 HF 'rpm' package for $(BINARY) version '$(RPMVERSION)-$(ITERATION)'."
 	fpm -s dir -t rpm $(PACKAGE_ARGS) -a armhf -v $(RPMVERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn rpmsign --key-id=$(SIGNING_KEY) --resign $(BINARY)-$(RPMVERSION)-$(ITERATION).armhf.rpm; expect -exact \"Enter pass phrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 debarmhf: $(BINARY)_$(VERSION)-$(ITERATION)_armhf.deb
 $(BINARY)_$(VERSION)-$(ITERATION)_armhf.deb: package_build_linux_armhf check_fpm
 	@echo "Building 32-bit ARM6/7 HF 'deb' package for $(BINARY) version '$(VERSION)-$(ITERATION)'."
 	fpm -s dir -t deb $(PACKAGE_ARGS) -a armhf -v $(VERSION) -C $<
+	[ "$(SIGNING_KEY)" == "" ] || expect -c "spawn debsigs --default-key="$(SIGNING_KEY)" --sign=origin $(BINARY)_$(VERSION)-$(ITERATION)_armhf.deb; expect -exact \"Enter passphrase: \"; send \"$(PRIVATE_KEY)\r\"; expect eof"
 
 # Build an environment that can be packaged for linux.
 package_build_linux: readme man linux
@@ -276,20 +291,3 @@ install: man readme $(BINARY)
 	/usr/bin/install -m 0644 -cp examples/$(CONFIG_FILE).example $(ETC)/$(BINARY)/
 	[ -f $(ETC)/$(BINARY)/$(CONFIG_FILE) ] || /usr/bin/install -m 0644 -cp  examples/$(CONFIG_FILE).example $(ETC)/$(BINARY)/$(CONFIG_FILE)
 	/usr/bin/install -m 0644 -cp LICENSE *.html examples/* $(PREFIX)/share/doc/$(BINARY)/
-
-# If you installed with `make install` run `make uninstall` before installing a binary package. (even on Linux!!!)
-# This will remove the package install from macOS, it will not remove a package install from Linux.
-uninstall:
-	@echo "  ==> You must run make uninstall as root on Linux. Recommend not running as root on macOS."
-	[ -x /bin/systemctl ] && /bin/systemctl disable $(BINARY) || true
-	[ -x /bin/systemctl ] && /bin/systemctl stop $(BINARY) || true
-	[ -x /bin/launchctl ] && [ -f ~/Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist ] \
-		&& /bin/launchctl unload ~/Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist || true
-	[ -x /bin/launchctl ] && [ -f /Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist ] \
-		&& /bin/launchctl unload /Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist || true
-	rm -rf /usr/local/{etc,bin,share/doc}/$(BINARY)
-	rm -f ~/Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist
-	rm -f /Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist || true
-	rm -f /etc/systemd/system/$(BINARY).service /usr/local/share/man/man1/$(BINARY).1.gz
-	[ -x /bin/systemctl ] && /bin/systemctl --system daemon-reload || true
-	@[ -f /Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist ] && echo "  ==> Unload and delete this file manually:" && echo "  sudo launchctl unload /Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist" && echo "  sudo rm -f /Library/LaunchAgents/com.github.$(GHUSER).$(BINARY).plist" || true
